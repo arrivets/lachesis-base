@@ -14,6 +14,7 @@ import (
 	"github.com/Fantom-foundation/lachesis-base/inter/dag/tdag"
 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
 	"github.com/Fantom-foundation/lachesis-base/inter/pos"
+	"github.com/Fantom-foundation/lachesis-base/kvdb"
 	"github.com/Fantom-foundation/lachesis-base/kvdb/memorydb"
 )
 
@@ -22,16 +23,23 @@ func tCrit(err error) { panic(err) }
 func BenchmarkIndex_ForklessCause(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
-		benchForklessCauseMain(b, &i)
+		benchForklessCauseMain(b, &i, true)
 	}
 }
 
-func benchForklessCauseMain(b *testing.B, idx *int) {
-	benchForklessCauseProcess(b, idx)
+func BenchmarkIndex_ForklessCause_LevelDB(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		benchForklessCauseMain(b, &i, false)
+	}
 }
 
-func benchForklessCauseProcess(b *testing.B, idx *int) {
-	nodes := tdag.GenNodes(70)
+func benchForklessCauseMain(b *testing.B, idx *int, inmem bool) {
+	benchForklessCauseProcess(b, idx, inmem)
+}
+
+func benchForklessCauseProcess(b *testing.B, idx *int, inmem bool) {
+	nodes := tdag.GenNodes(10)
 	validators := pos.EqualWeightValidators(nodes, 1)
 
 	events := make(map[hash.Event]dag.Event)
@@ -39,8 +47,22 @@ func benchForklessCauseProcess(b *testing.B, idx *int) {
 		return events[id]
 	}
 
+	var db kvdb.Store
+	if inmem {
+		db = memorydb.New()
+	} else {
+		db = tempLevelDB("forkless_cause")
+		defer func() {
+			err := db.Close()
+			if err != nil {
+				panic(err)
+			}
+			db.Drop()
+		}()
+	}
+
 	vi := NewIndex(tCrit, LiteConfig())
-	vi.Reset(validators, memorydb.New(), getEvent)
+	vi.Reset(validators, db, getEvent)
 
 	tdag.ForEachRandEvent(nodes, 10, 2, nil, tdag.ForEachEvent{
 		Process: func(e dag.Event, name string) {
