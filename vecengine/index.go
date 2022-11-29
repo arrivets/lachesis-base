@@ -10,7 +10,6 @@ import (
 	"github.com/Fantom-foundation/lachesis-base/inter/pos"
 	"github.com/Fantom-foundation/lachesis-base/kvdb"
 	"github.com/Fantom-foundation/lachesis-base/kvdb/batched"
-	"github.com/Fantom-foundation/lachesis-base/kvdb/flushable"
 	"github.com/Fantom-foundation/lachesis-base/kvdb/table"
 )
 
@@ -55,10 +54,10 @@ func NewIndex(crit func(error), callbacks Callbacks) *Engine {
 }
 
 // Reset resets buffers.
-func (vi *Engine) Reset(validators *pos.Validators, db kvdb.Store, getEvent func(hash.Event) dag.Event) {
+func (vi *Engine) Reset(validators *pos.Validators, db kvdb.FlushableKVStore, getEvent func(hash.Event) dag.Event) {
 	// use wrapper to be able to drop failed events by dropping cache
 	vi.getEvent = getEvent
-	vi.vecDb = flushable.WrapWithDrop(db, func() {})
+	vi.vecDb = db
 	vi.validators = validators
 	vi.validatorIdxs = validators.Idxs()
 	vi.DropNotFlushed()

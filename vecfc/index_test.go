@@ -10,57 +10,38 @@ import (
 	"github.com/Fantom-foundation/lachesis-base/inter/dag/tdag"
 	"github.com/Fantom-foundation/lachesis-base/inter/pos"
 	"github.com/Fantom-foundation/lachesis-base/kvdb"
+	"github.com/Fantom-foundation/lachesis-base/kvdb/flushable"
 	"github.com/Fantom-foundation/lachesis-base/kvdb/leveldb"
 	"github.com/Fantom-foundation/lachesis-base/kvdb/memorydb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 )
 
-func BenchmarkIndex_Add(b *testing.B) {
-	b.StopTimer()
-
-	nodes := tdag.GenNodes(70)
-	ordered := make(dag.Events, 0)
-	tdag.ForEachRandEvent(nodes, 10, 10, nil, tdag.ForEachEvent{
-		Process: func(e dag.Event, name string) {
-			ordered = append(ordered, e)
-		},
-	})
-
-	validatorsBuilder := pos.NewBuilder()
-	for _, peer := range nodes {
-		validatorsBuilder.Set(peer, 1)
+func BenchmarkIndex_Add_MemoryDB(b *testing.B) {
+	dbProducer := func() kvdb.FlushableKVStore {
+		return flushable.Wrap(memorydb.New())
 	}
-	validators := validatorsBuilder.Build()
-	events := make(map[hash.Event]dag.Event)
-	getEvent := func(id hash.Event) dag.Event {
-		return events[id]
-	}
-	for _, e := range ordered {
-		events[e.ID()] = e
-	}
+	benchmarkd_Index_Add(b, dbProducer)
+}
 
-	vecClock := NewIndex(func(err error) { panic(err) }, LiteConfig())
-	vecClock.Reset(validators, memorydb.New(), getEvent)
-
-	for i := 0; i < b.N; i++ {
-		b.StopTimer()
-		vecClock.Reset(validators, memorydb.New(), getEvent)
-		b.StartTimer()
-		for _, e := range ordered {
-			err := vecClock.Add(e)
-			if err != nil {
-				panic(err)
-			}
-			vecClock.Flush()
-			i++
-			if i >= b.N {
-				break
-			}
-		}
+func BenchmarkIndex_Add_BackupFlushable(b *testing.B) {
+	// the total database produced by the test is roughly 4'000'000 bytes (checked
+	// against multiple runs) so we set the limit to half of that to force the
+	// database to switch from memory to leveldb halfway through.
+	dbProducer := func() kvdb.FlushableKVStore {
+		return flushable.NewBackupFlushable(2000000, tempLevelDB, func() {})
 	}
+	benchmarkd_Index_Add(b, dbProducer)
 }
 
 func BenchmarkIndex_Add_LevelDB(b *testing.B) {
+	dbProducer := func() kvdb.FlushableKVStore {
+		db, _ := tempLevelDB()
+		return flushable.Wrap(db)
+	}
+	benchmarkd_Index_Add(b, dbProducer)
+}
+
+func benchmarkd_Index_Add(b *testing.B, dbProducer func() kvdb.FlushableKVStore) {
 	b.StopTimer()
 
 	nodes := tdag.GenNodes(70)
@@ -85,13 +66,12 @@ func BenchmarkIndex_Add_LevelDB(b *testing.B) {
 	}
 
 	vecClock := NewIndex(func(err error) { panic(err) }, LiteConfig())
-	vecClock.Reset(validators, tempLevelDB("vclock"), getEvent)
 
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
-		vecClock.Reset(validators, tempLevelDB("vclock"), getEvent)
+		vecClock.Reset(validators, dbProducer(), getEvent)
 		b.StartTimer()
-		for _, e := range ordered {
+		for i, e := range ordered {
 			err := vecClock.Add(e)
 			if err != nil {
 				panic(err)
@@ -105,7 +85,7 @@ func BenchmarkIndex_Add_LevelDB(b *testing.B) {
 	}
 }
 
-func tempLevelDB(name string) kvdb.Store {
+func tempLevelDB() (kvdb.Store, error) {
 	cache16mb := func(string) (int, int) {
 		return 16 * opt.MiB, 64
 	}
@@ -114,6 +94,6 @@ func tempLevelDB(name string) kvdb.Store {
 		panic(fmt.Sprintf("can't create temporary directory %s: %v", dir, err))
 	}
 	disk := leveldb.NewProducer(dir, cache16mb)
-	ldb, _ := disk.OpenDB("1")
-	return ldb
+	ldb, _ := disk.OpenDB("0")
+	return ldb, nil
 }

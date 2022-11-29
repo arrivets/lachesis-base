@@ -13,6 +13,7 @@ import (
 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
 	"github.com/Fantom-foundation/lachesis-base/inter/pos"
 	"github.com/Fantom-foundation/lachesis-base/kvdb"
+	"github.com/Fantom-foundation/lachesis-base/kvdb/flushable"
 	"github.com/Fantom-foundation/lachesis-base/kvdb/memorydb"
 	"github.com/Fantom-foundation/lachesis-base/lachesis"
 	"github.com/Fantom-foundation/lachesis-base/utils/adapters"
@@ -197,7 +198,7 @@ func testRestartAndReset(t *testing.T, weights []pos.Weight, mutateWeights bool,
 			store.openEpochDB(restartEpoch)
 			dagIndexer.Reset(
 				store.GetEpochState().Validators,
-				store.epochTable.VectorIndex,
+				flushable.Wrap(store.epochTable.VectorIndex),
 				inputs[RESTORED].GetEvent)
 			dagIndexer.ReindexIfEmpty(func(onEvent func(e dag.Event) bool) {
 				inputs[RESTORED].ForEachEpochEvent(store.GetEpochState().Epoch, onEvent)
