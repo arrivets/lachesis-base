@@ -5,14 +5,14 @@ import (
 
 	"github.com/Fantom-foundation/lachesis-base/kvdb"
 	"github.com/Fantom-foundation/lachesis-base/kvdb/batched"
-	"github.com/Fantom-foundation/lachesis-base/kvdb/devnulldb"
+	"github.com/Fantom-foundation/lachesis-base/kvdb/memstore"
 )
 
 // BackupFlushable is a flushable inmemory database that switches to a
 // persistent database when its size reaches a certain limit
 type BackupFlushable struct {
 	*Flushable
-	memorydb  *Flushable
+	memstore  *memstore.Database
 	producer  func() (kvdb.Store, error) // function used to produce the persistent db
 	sizeLimit int                        // max size of memorydb
 }
@@ -22,18 +22,11 @@ func NewBackupFlushable(sizeLimit int, producer func() (kvdb.Store, error), drop
 		panic("nil producer")
 	}
 
-	// memorydb is itself a flushable around a devnulldb, but it is never flushed.
-	// We use it as the initial underlying store of the BackupFlushable. When we
-	// call flush on the BackupFlushable, the contents of the BackupFlushable's
-	// write-ahead cache ('modified') is written to memorydb, but memorydb
-	// itself is never flushed. When the size of memorydb exceeds the limit, its
-	// contents are copied to a persistent db, and memorydb is deleted and
-	// dropped.
-	memorydb := Wrap(devnulldb.New())
+	memstore := memstore.New()
 
 	w := &BackupFlushable{
-		Flushable: WrapWithDrop(memorydb, drop),
-		memorydb:  memorydb,
+		Flushable: WrapWithDrop(memstore, drop),
+		memstore:  memstore,
 		producer:  producer,
 		sizeLimit: sizeLimit,
 	}
@@ -49,10 +42,10 @@ func (w *BackupFlushable) Flush() (err error) {
 	w.lock.Lock()
 	defer w.lock.Unlock()
 
-	if w.memorydb != nil &&
+	if w.memstore != nil &&
 		w.producer != nil &&
-		*w.memorydb.sizeEstimation >= w.sizeLimit {
-		fmt.Printf("backup-flushable-db switching. size = %d, limit = %d\n", *w.memorydb.sizeEstimation, w.sizeLimit)
+		w.memstore.SizeEstimation() >= w.sizeLimit {
+		fmt.Printf("backup-flushable-db switching. size = %d, limit = %d\n", w.memstore.SizeEstimation(), w.sizeLimit)
 		err = w.switchUnderlying()
 		if err != nil {
 			return err
@@ -71,7 +64,7 @@ func (w *BackupFlushable) switchUnderlying() error {
 
 	// copy everything
 	wrappedNewDB := batched.Wrap(newDB)
-	it := w.memorydb.NewIterator(nil, nil)
+	it := w.memstore.NewIterator(nil, nil)
 	for it.Next() {
 		wrappedNewDB.Put(it.Key(), it.Value())
 	}
@@ -79,13 +72,13 @@ func (w *BackupFlushable) switchUnderlying() error {
 	wrappedNewDB.Flush()
 
 	// closing the oldDB deletes all its contents because it was never flushed
-	w.memorydb.Close()
+	w.memstore.Close()
 
 	// switch
 	w.underlying = newDB
 	w.flushableReader.underlying = newDB
 	w.producer = nil // need once
-	w.memorydb = nil
+	w.memstore = nil
 
 	return nil
 }

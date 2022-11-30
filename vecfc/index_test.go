@@ -13,6 +13,7 @@ import (
 	"github.com/Fantom-foundation/lachesis-base/kvdb/flushable"
 	"github.com/Fantom-foundation/lachesis-base/kvdb/leveldb"
 	"github.com/Fantom-foundation/lachesis-base/kvdb/memorydb"
+	"github.com/Fantom-foundation/lachesis-base/kvdb/memstore"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 )
 
@@ -23,15 +24,22 @@ func BenchmarkIndex_Add_MemoryDB(b *testing.B) {
 	benchmarkd_Index_Add(b, dbProducer)
 }
 
-func BenchmarkIndex_Add_BackupFlushable(b *testing.B) {
-	// the total database produced by the test is roughly 4'000'000 bytes (checked
-	// against multiple runs) so we set the limit to half of that to force the
-	// database to switch from memory to leveldb halfway through.
+func BenchmarkIndex_Add_Memstore(b *testing.B) {
 	dbProducer := func() kvdb.FlushableKVStore {
-		return flushable.NewBackupFlushable(2000000, tempLevelDB, func() {})
+		return flushable.Wrap(memstore.New())
 	}
 	benchmarkd_Index_Add(b, dbProducer)
 }
+
+// func BenchmarkIndex_Add_BackupFlushable(b *testing.B) {
+// 	// the total database produced by the test is roughly 4'000'000 bytes (checked
+// 	// against multiple runs) so we set the limit to half of that to force the
+// 	// database to switch from memory to leveldb halfway through.
+// 	dbProducer := func() kvdb.FlushableKVStore {
+// 		return flushable.NewBackupFlushable(2000000, tempLevelDB, func() {})
+// 	}
+// 	benchmarkd_Index_Add(b, dbProducer)
+// }
 
 func BenchmarkIndex_Add_LevelDB(b *testing.B) {
 	dbProducer := func() kvdb.FlushableKVStore {
