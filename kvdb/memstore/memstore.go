@@ -93,9 +93,10 @@ func (db *Database) Put(key []byte, value []byte) error {
 	if db.db == nil {
 		return errMemorydbClosed
 	}
-	db.db[string(key)] = common.CopyBytes(value)
 
+	db.db[string(key)] = common.CopyBytes(value)
 	db.sizeEstimation += len(key) + len(value)
+
 	return nil
 }
 
@@ -252,9 +253,11 @@ func (b *batch) Write() error {
 	for _, keyvalue := range b.writes {
 		if keyvalue.delete {
 			delete(b.db.db, string(keyvalue.key))
+			b.db.sizeEstimation -= (len(keyvalue.key) + len(keyvalue.value))
 			continue
 		}
 		b.db.db[string(keyvalue.key)] = keyvalue.value
+		b.db.sizeEstimation += (len(keyvalue.key) + len(keyvalue.value))
 	}
 	return nil
 }
