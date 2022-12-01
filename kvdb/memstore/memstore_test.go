@@ -1,69 +1,47 @@
 package memstore
 
 import (
-	"bytes"
-	"fmt"
-	"sync"
+	"reflect"
 	"testing"
-	"time"
 
 	"github.com/Fantom-foundation/lachesis-base/common/bigendian"
+	"github.com/Fantom-foundation/lachesis-base/kvdb"
 )
 
 func BenchmarkMemstore(b *testing.B) {
-	memstore := New()
-
-	const recs = 64
-
-	for _, flushPeriod := range []int{0, 1, 10, 100, 1000} {
-		for goroutines := 1; goroutines <= recs; goroutines *= 2 {
-			for reading := 0; reading <= 1; reading++ {
-				name := fmt.Sprintf(
-					"%d goroutines with flush every %d ops, readingExtensive=%d",
-					goroutines, flushPeriod, reading)
-				b.Run(name, func(b *testing.B) {
-					benchmarkMemstore(memstore, goroutines, b.N, flushPeriod, reading != 0)
-				})
-			}
-		}
-	}
+	db := New()
+	benchmark(b, db)
 }
 
-func benchmarkMemstore(db *Database, goroutines, recs, flushPeriod int, readingExtensive bool) {
-	leftRecs := recs
-	var wg sync.WaitGroup
-	wg.Add(goroutines)
-	for i := 0; i < goroutines; i++ {
-		var ops = recs/goroutines + 1
-		if ops > leftRecs {
-			ops = leftRecs
+func benchmark(b *testing.B, db kvdb.Store) {
+	putOp := func(key []byte, value []byte) {
+		err := db.Put(key, value)
+		if err != nil {
+			b.Error(err)
 		}
-		leftRecs -= ops
-		go func(i int) {
-			defer wg.Done()
-
-			for op := 0; op < ops; op++ {
-				step := op & 0xff
-				key := bigendian.Uint64ToBytes(uint64(step << 48))
-				val := bigendian.Uint64ToBytes(uint64(step))
-
-				rare := time.Now().Unix()%100 == 0
-				if readingExtensive == rare {
-					err := db.Put(key, val)
-					if err != nil {
-						panic(err)
-					}
-				} else {
-					got, err := db.Get(key)
-					if err != nil {
-						panic(err)
-					}
-					if got != nil && !bytes.Equal(val, got) {
-						panic("invalid value")
-					}
-				}
-			}
-		}(i)
 	}
-	wg.Wait()
+
+	loopOp(putOp)
+
+	getOp := func(key []byte, val []byte) {
+		v, err := db.Get(key)
+		if err != nil {
+			b.Error(err)
+		}
+		if !reflect.DeepEqual(v, val) {
+			b.Errorf("retrieved value does not match expected value")
+		}
+	}
+
+	loopOp(getOp)
+}
+
+func loopOp(operation func(key []byte, val []byte)) {
+	const ops = 1000000
+	for op := 0; op < ops; op++ {
+		step := op & 0xff
+		key := bigendian.Uint64ToBytes(uint64(step << 48))
+		val := bigendian.Uint64ToBytes(uint64(step))
+		operation(key, val)
+	}
 }

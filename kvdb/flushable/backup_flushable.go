@@ -5,14 +5,14 @@ import (
 
 	"github.com/Fantom-foundation/lachesis-base/kvdb"
 	"github.com/Fantom-foundation/lachesis-base/kvdb/batched"
-	"github.com/Fantom-foundation/lachesis-base/kvdb/memstore"
+	"github.com/Fantom-foundation/lachesis-base/kvdb/devnulldb"
 )
 
 // BackupFlushable is a flushable inmemory database that switches to a
 // persistent database when its size reaches a certain limit
 type BackupFlushable struct {
 	*Flushable
-	memstore  *memstore.Database
+	memorydb  *Flushable
 	producer  func() (kvdb.Store, error) // function used to produce the persistent db
 	sizeLimit int                        // max size of memorydb
 }
@@ -22,11 +22,11 @@ func NewBackupFlushable(sizeLimit int, producer func() (kvdb.Store, error), drop
 		panic("nil producer")
 	}
 
-	memstore := memstore.New()
+	memorydb := Wrap(devnulldb.New())
 
 	w := &BackupFlushable{
-		Flushable: WrapWithDrop(memstore, drop),
-		memstore:  memstore,
+		Flushable: WrapWithDrop(memorydb, drop),
+		memorydb:  memorydb,
 		producer:  producer,
 		sizeLimit: sizeLimit,
 	}
@@ -42,10 +42,10 @@ func (w *BackupFlushable) Flush() (err error) {
 	w.lock.Lock()
 	defer w.lock.Unlock()
 
-	if w.memstore != nil &&
+	if w.memorydb != nil &&
 		w.producer != nil &&
-		w.memstore.SizeEstimation() >= w.sizeLimit {
-		fmt.Printf("backup-flushable-db switching. size = %d, limit = %d\n", w.memstore.SizeEstimation(), w.sizeLimit)
+		*w.memorydb.sizeEstimation >= w.sizeLimit {
+		fmt.Printf("backup-flushable-db switching. size = %d, limit = %d\n", *w.memorydb.sizeEstimation, w.sizeLimit)
 		err = w.switchUnderlying()
 		if err != nil {
 			return err
@@ -64,7 +64,7 @@ func (w *BackupFlushable) switchUnderlying() error {
 
 	// copy everything
 	wrappedNewDB := batched.Wrap(newDB)
-	it := w.memstore.NewIterator(nil, nil)
+	it := w.memorydb.NewIterator(nil, nil)
 	for it.Next() {
 		wrappedNewDB.Put(it.Key(), it.Value())
 	}
@@ -72,13 +72,13 @@ func (w *BackupFlushable) switchUnderlying() error {
 	wrappedNewDB.Flush()
 
 	// closing the oldDB deletes all its contents because it was never flushed
-	w.memstore.Close()
+	w.memorydb.Close()
 
 	// switch
 	w.underlying = newDB
 	w.flushableReader.underlying = newDB
 	w.producer = nil // need once
-	w.memstore = nil
+	w.memorydb = nil
 
 	return nil
 }
